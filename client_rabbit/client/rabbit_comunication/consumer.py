@@ -39,7 +39,6 @@ class RabbitMQConsumer(Thread):
 
     def _callback(self, ch, method, properties, body):
         bboxes, frame = self._deserialize(body)
-        print(bboxes.shape)
         if bboxes.shape[0] > 0:
             # bboxes = np.frombuffer(data, dtype=np.float64).reshape((len(data)//48, 6))
 
