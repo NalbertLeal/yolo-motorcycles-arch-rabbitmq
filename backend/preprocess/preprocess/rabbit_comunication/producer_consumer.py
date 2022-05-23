@@ -8,10 +8,13 @@ import pika
 from preprocess.onnx_preprocessing import image
 
 class RabbitMQProducerConsumer():
-    def __init__(self, host: str, consumer_routing_keys: List[str], producer_routing_keys: List[str]):
+    def __init__(self, host: str, consumer_routing_keys: List[str], producer_routing_key: List[str], number_yolos: int):
         self.host = host
         self.consumer_routing_keys = consumer_routing_keys
-        self.producer_routing_keys = producer_routing_keys
+        self.producer_routing_key = producer_routing_key
+        self.number_yolos = number_yolos
+        self.media_to_yolos = {}
+        self.next_yolo = 0
 
         self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.host))
         self.channel = self.connection.channel()
@@ -40,10 +43,10 @@ class RabbitMQProducerConsumer():
         json_package['frame'] = np.array(json_package['frame'], dtype=np.uint8)
         return json_package
     
-    def _serialize(sellf, json_package, frame):
+    def _serialize(sellf, name, frame):
         (_, c, h, w) = frame.shape
         package = {
-            'name': json_package['name'],
+            'name': name,
             'height': h,
             'width': w,
             'channels': c,
@@ -54,9 +57,15 @@ class RabbitMQProducerConsumer():
     def _callback(self, ch, method, properties, body):
         json_package = self._deserialize(body)
         onnx_image = image.preprocess_image_to_onnx(json_package['frame'])
-        self._send(json_package, onnx_image)
+        self._send(json_package['name'], onnx_image)
 
-    def _send(self, json_package, frame):
-        for routing_key in self.producer_routing_keys:
-            serialized = self._serialize(json_package, frame)
-            self.channel.basic_publish(exchange='motorcycles', routing_key=routing_key, body=serialized)
+    def _send(self, name, frame):
+        if name not in self.media_to_yolos.keys():
+            self.media_to_yolos[name] = self.next_yolo
+            if self.next_yolo+1 == self.number_yolos:
+                self.next_yolo = 0
+            else:
+                self.next_yolo += 1
+        # for routing_key in self.producer_routing_keys:
+        serialized = self._serialize(name, frame)
+        self.channel.basic_publish(exchange='motorcycles', routing_key=self.producer_routing_key+str(self.media_to_yolos[name]), body=serialized)
