@@ -6,7 +6,8 @@ import cv2
 import numpy as np
 import pika
 
-from client.encode_decode import opencv_frame, yolo_result
+# from client.encode_decode import opencv_frame, yolo_result
+import client.proto.motorcycle_pb2 as mpb
 
 class RabbitMQConsumer(Thread):
     def __init__(self, host: str, routing_keys: List[str]):
@@ -29,8 +30,12 @@ class RabbitMQConsumer(Thread):
     def __del__(self):
         self.connection.close()
 
-    def _deserialize(self, bboxes_frame):
-        return yolo_result.decode(bboxes_frame)
+    # def _deserialize(self, bboxes_frame):
+    def _deserialize(self, body):
+        # return yolo_result.decode(bboxes_frame)
+        yolo_pg = mpb.YOLOv5Package()
+        yolo_pg.ParseFromString(body)
+        return yolo_pg
 
     def convert(self, img, target_type_min, target_type_max, target_type):
         imin = np.min(img)
@@ -42,13 +47,15 @@ class RabbitMQConsumer(Thread):
         return new_img
 
     def _callback(self, ch, method, properties, body):
-        _, bboxes, frame = self._deserialize(body)
+        yolo_pg = self._deserialize(body)
+
+        frame = np.frombuffer(yolo_pg.frame.frame, dtype=np.float32).reshape(yolo_pg.frame.shape)
+        frame = np.squeeze(frame)
         frame = frame.transpose(1, 2, 0)
-        
         frame = self.convert(frame, 0, 255, np.uint8)
 
-        if bboxes is not None and bboxes.shape[0] > 0:
-            # bboxes = np.frombuffer(data, dtype=np.float64).reshape((len(data)//48, 6))
+        if len(yolo_pg.bboxes.shape) > 0:
+            bboxes = np.frombuffer(yolo_pg.bboxes.bboxes, dtype=np.float64).reshape(yolo_pg.bboxes.shape)
 
             for box in bboxes:
                 [minx, miny, maxx, maxy, confidence, _] = box
@@ -62,9 +69,6 @@ class RabbitMQConsumer(Thread):
                 cv2.putText(frame, 'Motorcycle '+str(confidence)[2:4]+'%', (int(minx), int(miny) - 12), 0, 0.005 * (int(maxy) - int(miny)), (0,255,0), 10//3)
                 frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         
-        cv2.imshow('video result', frame)
-
-        cv2.waitKey(1)
         cv2.imshow('video result', frame)
 
         cv2.waitKey(1)

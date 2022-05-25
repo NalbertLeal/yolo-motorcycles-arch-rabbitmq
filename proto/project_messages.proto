@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package motorcycle;
+
+message YOLOv5Package {
+    message Frame {
+        repeated int32 shape = 1;
+        bytes frame = 2;
+    }
+
+    message BBoxes {
+        repeated int32 shape = 1;
+        bytes bboxes = 2;
+    }
+
+    string name = 1;
+    BBoxes bboxes = 2;
+    Frame frame = 3;
+}

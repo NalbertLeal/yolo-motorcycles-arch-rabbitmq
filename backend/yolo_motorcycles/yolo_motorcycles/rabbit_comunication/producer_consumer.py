@@ -7,6 +7,7 @@ import pika
 
 from yolo_motorcycles.encode_decode import opencv_frame, yolo_result
 from yolo_motorcycles.model import model
+import yolo_motorcycles.proto.motorcycle_pb2 as mpb
 
 class RabbitMQProducerConsumer():
     def __init__(self, host: str, consumer_routing_keys: List[str], producer_routing_keys: List[str]):
@@ -33,30 +34,30 @@ class RabbitMQProducerConsumer():
     def __del__(self):
         self.connection.close()
 
-    def _deserialize(self, frame_bytes):
-        # json_package = ujson.loads(package)
-        # return json_package['name'], np.array(json_package['frame'], dtype=np.float32)
-        return opencv_frame.decode(frame_bytes, array_type=np.float32)
+    # def _deserialize(self, frame_bytes):
+        # return opencv_frame.decode(frame_bytes, array_type=np.float32)
+    def _deserialize(self, body):
+        yolo_pg = mpb.YOLOv5Package()
+        yolo_pg.ParseFromString(body)
+        return yolo_pg
     
+    # def _serialize(sellf, name, bboxes, frame):
+    #     frame = np.squeeze(frame)
+    #     return yolo_result.encode(name, bboxes, frame)
     def _serialize(sellf, name, bboxes, frame):
-        # (_, c, h, w) = frame.shape
-        # package = {
-        #     'name': name,
-        #     'height': h,
-        #     'width': w,
-        #     'channels': c,
-        #     'bboxes': bboxes.tolist(),
-        #     'frame': frame.tolist(),
-        # }
-        # return ujson.dumps(package)
-        frame = np.squeeze(frame)
-        return yolo_result.encode(name, bboxes, frame)
+        yolo_pg = mpb.YOLOv5Package()
+        yolo_pg.name = name
+        yolo_pg.frame.shape.extend(frame.shape)
+        yolo_pg.frame.frame = frame.tobytes()
+        yolo_pg.bboxes.shape.extend(bboxes.shape)
+        yolo_pg.bboxes.bboxes = bboxes.tobytes()
+        return yolo_pg.SerializeToString()
 
     def _callback(self, ch, method, properties, body):
-        name, frame = self._deserialize(body)
-        frame = np.expand_dims(frame, axis=0)
+        yolo_pg = self._deserialize(body)
+        frame = np.frombuffer(yolo_pg.frame.frame, dtype=np.float32).reshape(yolo_pg.frame.shape)
         bboxes = model.run_model(self.model, frame)
-        self._send(name, bboxes, frame)
+        self._send(yolo_pg.name, bboxes, frame)
 
     def _send(self, name, bboxes, frame):
         for routing_key in self.producer_routing_keys:

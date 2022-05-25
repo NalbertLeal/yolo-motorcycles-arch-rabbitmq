@@ -2,10 +2,13 @@ import time
 from threading import Thread
 from typing import List
 
-# import numpy as np
+import numpy as np
 import pika
+import cv2
 
-from client.encode_decode import opencv_frame
+# from client.encode_decode import opencv_frame
+import client.proto.motorcycle_pb2 as mpb
+
 class RabbitMQProducer(Thread):
     def __init__(self, host: str, routing_keys: List[str], video_reader: object, file_name: str):
         Thread.__init__(self)
@@ -24,17 +27,12 @@ class RabbitMQProducer(Thread):
         self.connection.close()
     
     def _serialize(self, frame):
-        """(h, w, c) = frame.shape
-        package = {
-            'name': self.file_name,
-            'height': h,
-            'width': w,
-            'channels': c,
-            'frame': frame.tolist(), 
-        }
-        return ujson.dumps(package)"""
-        return opencv_frame.encode(self.file_name, frame)
-
+        # return opencv_frame.encode(self.file_name, frame)
+        yolo_pg = mpb.YOLOv5Package()
+        yolo_pg.name = self.file_name
+        yolo_pg.frame.shape.extend(frame.shape)
+        yolo_pg.frame.frame = frame.tobytes()
+        return yolo_pg.SerializeToString()
 
     def send_frame(self, frame):
         for routing_key in self.routing_keys:
@@ -43,11 +41,12 @@ class RabbitMQProducer(Thread):
 
     def run(self):
         while True:
-            time.sleep(0.08)
+            time.sleep(0.05)
             self.video_reader.next_frame()
             self.video_reader.next_frame()
             self.video_reader.next_frame()
             has_frame, frame = self.video_reader.next_frame()
             if not has_frame:
                 break
+
             self.send_frame(frame)
