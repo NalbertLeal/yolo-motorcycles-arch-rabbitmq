@@ -1,10 +1,11 @@
-import json
+import ujson
 from typing import List
 
 # import cv2
 import numpy as np
 import pika
 
+from yolo_motorcycles.encode_decode import opencv_frame, yolo_result
 from yolo_motorcycles.model import model
 
 class RabbitMQProducerConsumer():
@@ -32,26 +33,28 @@ class RabbitMQProducerConsumer():
     def __del__(self):
         self.connection.close()
 
-    def _deserialize(self, package):
-        json_package = json.loads(package)
-        # (height, width, channels) = response['height'], response['width'], response['channels']
-
-        return json_package['name'], np.array(json_package['frame'], dtype=np.float32)
+    def _deserialize(self, frame_bytes):
+        # json_package = ujson.loads(package)
+        # return json_package['name'], np.array(json_package['frame'], dtype=np.float32)
+        return opencv_frame.decode(frame_bytes, array_type=np.float32)
     
     def _serialize(sellf, name, bboxes, frame):
-        (_, c, h, w) = frame.shape
-        package = {
-            'name': name,
-            'height': h,
-            'width': w,
-            'channels': c,
-            'bboxes': bboxes.tolist(),
-            'frame': frame.tolist(),
-        }
-        return json.dumps(package)
+        # (_, c, h, w) = frame.shape
+        # package = {
+        #     'name': name,
+        #     'height': h,
+        #     'width': w,
+        #     'channels': c,
+        #     'bboxes': bboxes.tolist(),
+        #     'frame': frame.tolist(),
+        # }
+        # return ujson.dumps(package)
+        frame = np.squeeze(frame)
+        return yolo_result.encode(name, bboxes, frame)
 
     def _callback(self, ch, method, properties, body):
         name, frame = self._deserialize(body)
+        frame = np.expand_dims(frame, axis=0)
         bboxes = model.run_model(self.model, frame)
         self._send(name, bboxes, frame)
 

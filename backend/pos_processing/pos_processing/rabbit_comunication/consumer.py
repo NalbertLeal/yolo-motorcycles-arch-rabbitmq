@@ -1,17 +1,12 @@
 import ujson
-from threading import Thread
 from typing import List
 
 import cv2
 import numpy as np
 import pika
 
-from client.encode_decode import opencv_frame, yolo_result
-
-class RabbitMQConsumer(Thread):
+class RabbitMQConsumer():
     def __init__(self, host: str, routing_keys: List[str]):
-        Thread.__init__(self)
-
         self.host = host
 
         self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.host))
@@ -29,42 +24,25 @@ class RabbitMQConsumer(Thread):
     def __del__(self):
         self.connection.close()
 
-    def _deserialize(self, bboxes_frame):
-        return yolo_result.decode(bboxes_frame)
+    def _deserialize(self, package):
+        json_package = ujson.loads(package)
+        (height, width, channels) = json_package['height'], json_package['width'], json_package['channels']
 
-    def convert(self, img, target_type_min, target_type_max, target_type):
-        imin = np.min(img)
-        imax = np.max(img)
+        bboxes = np.array(json_package['bboxes'], dtype=np.float64)
 
-        a = (target_type_max - target_type_min) / (imax - imin)
-        b = target_type_max - a * imax
-        new_img = (a * img + b).astype(target_type)
-        return new_img
+        frame = np.array(json_package['frame'], dtype=np.float32)
+        frame *= 255
+        return bboxes, frame.reshape((height, width, channels)).astype(np.uint8)
 
     def _callback(self, ch, method, properties, body):
-        _, bboxes, frame = self._deserialize(body)
-        frame = frame.transpose(1, 2, 0)
-        
-        frame = self.convert(frame, 0, 255, np.uint8)
-
-        if bboxes is not None and bboxes.shape[0] > 0:
+        bboxes, frame = self._deserialize(body)
+        if bboxes.shape[0] > 0:
             # bboxes = np.frombuffer(data, dtype=np.float64).reshape((len(data)//48, 6))
 
             for box in bboxes:
                 [minx, miny, maxx, maxy, confidence, _] = box
-                minx = int(max(minx, 0))
-                miny = int(max(miny, 0))
-                maxx = int(min(maxx, 639))
-                maxy = int(min(maxy, 639))
-
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                cv2.rectangle(frame, (minx, miny), (maxx, maxy), (0, 254 ,0), thickness=10)
+                cv2.rectangle(frame,(int(minx), int(miny)), (int(maxx), int(maxy)), (0,255,0), 10)
                 cv2.putText(frame, 'Motorcycle '+str(confidence)[2:4]+'%', (int(minx), int(miny) - 12), 0, 0.005 * (int(maxy) - int(miny)), (0,255,0), 10//3)
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        
-        cv2.imshow('video result', frame)
-
-        cv2.waitKey(1)
         cv2.imshow('video result', frame)
 
         cv2.waitKey(1)

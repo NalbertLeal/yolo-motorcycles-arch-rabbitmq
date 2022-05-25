@@ -1,10 +1,11 @@
-import json
+import ujson
 from typing import List
 
 import cv2
 import numpy as np
 import pika
 
+from preprocess.encode_decode import opencv_frame
 from preprocess.onnx_preprocessing import image
 
 class RabbitMQProducerConsumer():
@@ -34,32 +35,18 @@ class RabbitMQProducerConsumer():
     def __del__(self):
         self.connection.close()
 
-    def _deserialize(self, package):
-        json_package = json.loads(package)
-        # (height, width, channels) = response['height'], response['width'], response['channels']
-        
-        # arr = np.array(response['frame'])
-        # return np.frombuffer(arr, dtype=np.uint64).reshape((height, width, channels)).astype(np.uint8)
-        json_package['frame'] = np.array(json_package['frame'], dtype=np.uint8)
-        return json_package
+    def _deserialize(self, frame_bytes):
+        return opencv_frame.decode(frame_bytes)
     
     def _serialize(sellf, name, frame):
-        (_, c, h, w) = frame.shape
-        package = {
-            'name': name,
-            'height': h,
-            'width': w,
-            'channels': c,
-            'frame': frame.tolist(),
-        }
-        return json.dumps(package)
+        return opencv_frame.encode(name, frame)
 
     def _callback(self, ch, method, properties, body):
-        json_package = self._deserialize(body)
-        onnx_image = image.preprocess_image_to_onnx(json_package['frame'])
-        self._send(json_package['name'], onnx_image)
+        name, frame = self._deserialize(body)
+        onnx_image = image.preprocess_image_to_onnx(frame)
+        self._send(name, onnx_image)
 
-    def _send(self, name, frame):
+    def _send(self, name, onnx_image):
         if name not in self.media_to_yolos.keys():
             self.media_to_yolos[name] = self.next_yolo
             if self.next_yolo+1 == self.number_yolos:
@@ -67,5 +54,5 @@ class RabbitMQProducerConsumer():
             else:
                 self.next_yolo += 1
         # for routing_key in self.producer_routing_keys:
-        serialized = self._serialize(name, frame)
+        serialized = self._serialize(name, onnx_image)
         self.channel.basic_publish(exchange='motorcycles', routing_key=self.producer_routing_key+str(self.media_to_yolos[name]), body=serialized)

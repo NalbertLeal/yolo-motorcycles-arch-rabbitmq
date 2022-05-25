@@ -11,7 +11,7 @@ def preprocess_image_to_onnx(frame: np.ndarray) -> np.ndarray:
     img = resize_image(frame, YOLOv5_IMAGE_HEIGHT, YOLOv5_IMAGE_WIDTH)
     img = to_onnx_format(img, YOLOv5_IMAGE_HEIGHT, YOLOv5_IMAGE_WIDTH)
     img = normalize(img)
-    img = add_batch_dimension(img)
+    # img = add_batch_dimension(img)
     return img
 
 def resize_image(img: np.ndarray, height: int=640, width: int=640) -> np.ndarray:
